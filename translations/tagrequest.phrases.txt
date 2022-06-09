@@ -1,0 +1,15 @@
+"Phrases"
+{
+	"PendingRequest"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} You already requested the following tag: '{2}'. Wait for admin approval/denial before making a new one." 
+		"es" "{1} Ya pediste la siguiente tag: '{2}'. Esperá a la respuesta de un admin antes de pedir otra."
+	}
+	"RequestSent"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} Your request for tag '{2}' has been sent successfully. Wait for admin response." 
+		"es" "{1} Solicitud de tag '{2}' enviada. Esperá a la respuesta de un admin."
+	}
+}
