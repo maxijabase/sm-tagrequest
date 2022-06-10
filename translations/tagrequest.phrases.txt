@@ -3,19 +3,92 @@
 	"PendingRequest"
 	{
 		"#format" "{1:s},{2:s}"
-		"en" "{1} You already requested the following tag: '{2}'. Wait for admin approval/denial before making a new one." 
-		"es" "{1} Ya pediste la siguiente tag: '{2}'. Esperá a la respuesta de un admin antes de pedir otra."
+		"en" "{1} You already requested the following tag: {yellow}{2}{default}. Wait for admin approval/denial before making a new one." 
+		"es" "{1} Ya pediste la siguiente tag: {yellow}{2}{default}. Esperá a la respuesta de un admin antes de pedir otra."
 	}
 	"RequestSent"
 	{
 		"#format" "{1:s},{2:s}"
-		"en" "{1} Your request for tag '{2}' has been sent successfully. Wait for admin response." 
-		"es" "{1} Solicitud de tag '{2}' enviada. Esperá a la respuesta de un admin."
+		"en" "{1} Your request for tag {yellow}{2}{default} has been sent successfully. Wait for admin response." 
+		"es" "{1} Solicitud de tag {yellow}{2}{default} enviada. Esperá a la respuesta de un admin."
 	}
 	"NoRequests"
 	{
-		"#format {1:s}"
+		"#format" "{1:s}"
 		"en" "{1} No pending requests!"
 		"es" "{1} No hay solicitudes pendientes."
+	}
+	"TagApprovedAdmin"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} You successfully {green}approved{default} tag {yellow}{2}{default}." 
+		"es" "{1} {green}Aprobaste{default} la tag {yellow}{2}{default}."
+	}
+	"TagDeniedAdmin"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} You {red}denied{default} tag {yellow}{2}{default}." 
+		"es" "{1} {red}Denegaste{default} la tag {yellow}{2}{default}."
+	}
+	"TagApprovedUser"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} Your requested tag {yellow}{2}{default} has been {green}approved{default}." 
+		"es" "{1} Tu tag solicitada {yellow}{2}{default} fue {green}aprobada{default}."
+	}
+	"TagDeniedUser"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} Your requested tag {yellow}{2}{default} has been {red}denied{default}." 
+		"es" "{1} Tu tag solicitada {yellow}{2}{default} fue {red}denegada{default}."
+	}
+	"Str_TagRequests"
+	{
+		"en" "Tag Requests"
+		"es" "Solicitudes de tags"		
+	}
+	"Str_ShowingTagRequestOfUser"
+	{
+		"#format" "{1:s}"
+		"en" "{1}'s tag request"
+		"es" "Solicitud de tag de {1}"		
+	}
+	"Str_CurrentTag"
+	{
+		"#format" "{1:s}"
+		"en" "Current tag: {1}"
+		"es" "Tag actual: {1}"		
+	}
+	"Str_NewTag"
+	{
+		"#format" "{1:s}"
+		"en" "Requested tag: {1}"
+		"es" "Tag solicitada: {1}"		
+	}
+	"Str_DateRequested"
+	{
+		"#format" "{1:s}"
+		"en" "Date of request: {1}"
+		"es" "Fecha de solicitud: {1}"		
+	}	
+	"Str_Back"
+	{
+		"en" "Back"
+		"es" "Atrás"		
+	}
+	"Str_Exit"
+	{
+		"en" "Exit"
+		"es" "Salir"		
+	}
+	"Str_ApproveTag"
+	{
+		"en" "Approve tag"
+		"es" "Aprobar tag"		
+	}
+	"Str_DenyTag"
+	{
+		"en" "Deny tag"
+		"es" "Denegar tag"		
 	}
 }
