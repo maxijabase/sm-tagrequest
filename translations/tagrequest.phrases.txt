@@ -12,4 +12,10 @@
 		"en" "{1} Your request for tag '{2}' has been sent successfully. Wait for admin response." 
 		"es" "{1} Solicitud de tag '{2}' enviada. Esperá a la respuesta de un admin."
 	}
+	"NoRequests"
+	{
+		"#format {1:s}"
+		"en" "{1} No pending requests!"
+		"es" "{1} No hay solicitudes pendientes."
+	}
 }
