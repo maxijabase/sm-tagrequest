@@ -32,15 +32,15 @@
 	}
 	"TagApprovedUser"
 	{
-		"#format" "{1:s},{2:s}"
-		"en" "{1} Your requested tag {yellow}{2}{default} has been {green}approved{default}." 
-		"es" "{1} Tu tag solicitada {yellow}{2}{default} fue {green}aprobada{default}."
+		"#format" "{1:s}"
+		"en" "Your requested tag {1} has been approved." 
+		"es" "Tu tag solicitada {1} fue aprobada."
 	}
 	"TagDeniedUser"
 	{
-		"#format" "{1:s},{2:s}"
-		"en" "{1} Your requested tag {yellow}{2}{default} has been {red}denied{default}." 
-		"es" "{1} Tu tag solicitada {yellow}{2}{default} fue {red}denegada{default}."
+		"#format" "{1:s}"
+		"en" "Your requested tag {1} has been denied." 
+		"es" "Tu tag solicitada {1} fue denegada."
 	}
 	"Str_TagRequests"
 	{
