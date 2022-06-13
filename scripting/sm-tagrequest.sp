@@ -41,9 +41,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 }
 
 public void OnPluginStart() {
-	
 	HookEvent("player_team", OnClientJoinTeam);
-	
+
 	Database.Connect(SQL_Connection, "cccm");
 	RegAdminCmd("sm_tagrequest", CMD_TagRequest, ADMFLAG_GENERIC, "Makes a tag change request.");
 	RegAdminCmd("sm_seetagrequests", CMD_SeeTagRequests, ADMFLAG_GENERIC, "Lists all the tag requests.");
@@ -62,6 +61,10 @@ public void OnPluginStart() {
 	}
 }
 
+public void OnMapStart() {
+
+}
+
 public void OnClientAuthorized(int client, const char[] auth) {
 	g_Spawned[client] = false;
 	
@@ -72,15 +75,13 @@ public void OnClientAuthorized(int client, const char[] auth) {
 	PrintToServer("\n\n=====\nOnClientAuthorized\nclient %N steamid %s userid %s\n\n=====\n\n", client, steamid, userid);
 	
 	g_Players.SetString(userid, steamid);
-	g_Players.SetString(steamid, userid);
 }
 
 public void OnClientDisconnect(int client) {
-	char userid[64], steamid[32];
-	IntToString(GetClientUserId(client), userid, sizeof(userid));
-	g_Players.GetString(userid, steamid, sizeof(steamid));
+	char userid[64];
+	GetUserIdAsString(client, userid, sizeof(userid));
 	g_Players.Remove(userid);
-	g_Players.Remove(steamid);
+	g_Spawned[client] = false;
 }
 
 public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast) {
@@ -92,6 +93,7 @@ public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast)
 	CheckPendingMessages(userid);
 	g_Spawned[client] = true;
 }
+
 // ======= [COMMANDS] ======= //
 
 public Action CMD_TagRequest(int client, int args) {
@@ -135,7 +137,7 @@ public Action CMD_TagRequest(int client, int args) {
 	
 	char query[256];
 	g_DB.Format(query, sizeof(query), 
-		"INSERT INTO tag_requests (steam_id, name, current_tag, desired_tag, datetime, state) VALUES "...
+		"INSERT INTO tag_requests (steam_id, name, current_tag, desired_tag, datetime, state) VALUES " ...
 		"('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", steamid, req.name, req.oldtag, req.newtag, req.state);
 	
 	DataPack pack = new DataPack();
@@ -164,13 +166,14 @@ public Action CMD_SeeTagRequests(int client, int args) {
 void CacheRequests() {
 	
 	if (g_DB == null) {
-		PrintToServer("DB was null in CacheRequests!");
 		return;
 	}
 	
 	char query[128];
 	g_DB.Format(query, sizeof(query), "SELECT * FROM tag_requests WHERE state != 'finished'");
 	
+	PrintToServer("\n\n=====\nCacheRequests\nquery %s\n\n=====\n\n", query);
+
 	g_DB.Query(SQL_CacheRequests, query);
 }
 
@@ -215,11 +218,11 @@ void CheckPendingMessages(int userid) {
 	for (int i = 0; i < g_Requests.Length; i++) {
 		Request r;
 		g_Requests.GetArray(i, r, sizeof(r));
-		if (StrEqual(r.steamid, steamid)) {
-			if (!StrEqual(r.state, "pending")) {
-				SendInfoPanel(userid, r.state);
-				return;
-			}
+		if (StrEqual(r.steamid, steamid) && !StrEqual(r.state, "pending")) {
+			SendInfoPanel(userid, r.state);
+			g_SelectedRequest = r;
+			UpdateRequest("finished", 0);
+			return;
 		}
 	}
 }
@@ -229,25 +232,9 @@ void UpdateRequest(char[] state, int userid) {
 		return;
 	}
 	
-	int client = GetClientFromSteamID(g_SelectedRequest.steamid);
-	
-	PrintToServer("\n\n=====\nUpdateRequest\nclient found is %N, state is %s\n\n=====\n\n", client, state);
-	char finalState[16];
+	DeleteRequest(g_SelectedRequest.steamid);
 	char query[128];
-	
-	if (client != -1) {
-		SendInfoPanel(client, state);
-		Format(finalState, sizeof(finalState), "finished");
-		DeleteRequestLocal(g_SelectedRequest.steamid);
-	}
-	else {
-		Format(finalState, sizeof(finalState), state);
-		ChangeRequestLocal(g_SelectedRequest.steamid, state);
-	}
-	
-	PrintToServer("\n\n=====final state: %s\n\n=====\n\n", finalState);
-	
-	g_DB.Format(query, sizeof(query), "UPDATE tag_requests SET state = '%s' WHERE steam_id = '%s'", finalState, g_SelectedRequest.steamid);
+	g_DB.Format(query, sizeof(query), "UPDATE tag_requests SET state = '%s' WHERE steam_id = '%s' AND desired_tag = '%s'", state, g_SelectedRequest.steamid, g_SelectedRequest.newtag);
 	
 	DataPack pack = new DataPack();
 	pack.WriteString(state);
@@ -256,9 +243,10 @@ void UpdateRequest(char[] state, int userid) {
 	g_DB.Query(SQL_StatusUpdate, query, pack);
 }
 
-void SendInfoPanel(int client, const char[] state) {
+void SendInfoPanel(int userid, const char[] state) {
 	
-	PrintToServer("\n\n=====\nSendInfoPanel\nstate %s\n\n=====\n\n", state);
+	int client = GetClientOfUserId(userid);
+	PrintToServer("\n\n=====\nSendInfoPanel to %N\nstate %s\n\n=====\n\n", client, state);
 	
 	Panel panel = new Panel();
 	panel.SetTitle("Tag Request");
@@ -273,25 +261,12 @@ void SendInfoPanel(int client, const char[] state) {
 	panel.Send(client, EmptyHandler, MENU_TIME_FOREVER);
 }
 
-void DeleteRequestLocal(const char[] steamid) {
+void DeleteRequest(const char[] steamid) {
 	for (int i = 0; i < g_Requests.Length; i++) {
 		Request r;
 		g_Requests.GetArray(i, r, sizeof(r));
 		if (StrEqual(r.steamid, steamid)) {
 			g_Requests.Erase(i);
-			return;
-		}
-	}
-}
-
-void ChangeRequestLocal(const char[] steamid, const char[] state) {
-	for (int i = 0; i < g_Requests.Length; i++) {
-		Request r;
-		g_Requests.GetArray(i, r, sizeof(r));
-		if (StrEqual(r.steamid, steamid)) {
-			g_Requests.Erase(i);
-			Format(r.state, sizeof(r.state), state);
-			g_Requests.PushArray(r);
 			return;
 		}
 	}
@@ -371,10 +346,7 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
 }
 
 public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) {
-	switch (action) {
-		//case MenuAction_Select:delete menu;
-		//case MenuAction_End:delete menu;
-	}
+
 }
 
 // ======= [SQL CALLBACKS] ======= //
@@ -393,8 +365,10 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
 	
 	char phrase[32];
 	strcopy(phrase, sizeof(phrase), StrEqual(state, "approved") ? "TagApprovedAdmin" : "TagDeniedAdmin");
-	MC_PrintToChat(client, "%t", phrase, PREFIX, g_SelectedRequest.newtag);
-	CreateRequestsMenu(client);
+	if (client != 0) {
+		MC_PrintToChat(client, "%t", phrase, PREFIX, g_SelectedRequest.newtag);
+		CreateRequestsMenu(client);
+	}
 }
 
 public void SQL_CacheRequests(Database db, DBResultSet results, const char[] error, any data) {
@@ -414,7 +388,9 @@ public void SQL_CacheRequests(Database db, DBResultSet results, const char[] err
 	results.FieldNameToNum("desired_tag", wantedtagCol);
 	results.FieldNameToNum("datetime", timestampCol);
 	results.FieldNameToNum("state", stateCol);
-	
+
+	PrintToServer("SQL_CacheRequests received but no results yet.");
+
 	while (results.FetchRow()) {
 		Request req;
 		results.FetchString(steamidCol, req.steamid, sizeof(req.steamid));
