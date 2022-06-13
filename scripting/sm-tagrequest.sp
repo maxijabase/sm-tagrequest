@@ -1,6 +1,7 @@
 #include <sourcemod>
 #include <morecolors>
 #include <ccc>
+#include <cccm>
 #include "include/misc.inc"
 
 #pragma semicolon 1
@@ -186,11 +187,10 @@ void CreateRequestsMenu(int client) {
 		Request req;
 		g_Requests.GetArray(i, req, sizeof(req));
 		
-		if (!StrEqual(req.state, "pending")) {
-			continue;
+		if (StrEqual(req.state, "pending")) {
+			menu.AddItem(req.steamid, req.name);
 		}
 		
-		menu.AddItem(req.steamid, req.name);
 	}
 	
 	if (menu.ItemCount == 0) {
@@ -206,7 +206,7 @@ void GetPendingTag(const char[] steamid, char[] buffer, int maxsize) {
 	for (int i = 0; i < g_Requests.Length; i++) {
 		Request r;
 		g_Requests.GetArray(i, r, sizeof(r));
-		if (StrEqual(r.steamid, steamid)) {
+		if (StrEqual(r.steamid, steamid) && !StrEqual(r.state, "finished")) {
 			strcopy(buffer, maxsize, r.newtag);
 		}
 	}
@@ -219,9 +219,12 @@ void CheckPendingMessages(int userid) {
 	for (int i = 0; i < g_Requests.Length; i++) {
 		Request r;
 		g_Requests.GetArray(i, r, sizeof(r));
-		if (StrEqual(r.steamid, steamid) && !StrEqual(r.state, "pending")) {
+		if (StrEqual(r.steamid, steamid) && (StrEqual(r.state, "denied") || StrEqual(r.state, "approved"))) {
 			SendInfoPanel(userid, r.state);
 			g_SelectedRequest = r;
+			if (StrEqual(r.state, "approved")) {
+				SetClientTag(r, userid);
+			}
 			UpdateRequest("finished", 0);
 			return;
 		}
@@ -233,7 +236,6 @@ void UpdateRequest(char[] state, int userid) {
 		return;
 	}
 	
-	SetRequestState(g_SelectedRequest.steamid, state);
 	char query[256];
 	g_DB.Format(query, sizeof(query), "UPDATE tag_requests SET state = '%s' WHERE steam_id = '%s' AND desired_tag = '%s'" ... 
 		"ORDER BY id DESC LIMIT 1", state, g_SelectedRequest.steamid, g_SelectedRequest.newtag);
@@ -267,8 +269,13 @@ void SetRequestState(const char[] steamid, const char[] state) {
 		Request r;
 		g_Requests.GetArray(i, r, sizeof(r));
 		if (StrEqual(r.steamid, steamid)) {
-			strcopy(r.state, sizeof(r.state), state);
-			g_Requests.SetArray(i, r, sizeof(r));
+			if (StrEqual(state, "finished")) {
+				g_Requests.Erase(i);
+			}
+			else {
+				strcopy(r.state, sizeof(r.state), state);
+				g_Requests.SetArray(i, r, sizeof(r));
+			}
 			return;
 		}
 	}
@@ -305,6 +312,14 @@ void ShowRequestDetailsPanel(int client) {
 	p.DrawItem(exitStr);
 	
 	p.Send(client, RequestDetailsPanelHandler, MENU_TIME_FOREVER);
+}
+
+void SetClientTag(Request r, int userid) {
+	char query[256];
+	int client = GetClientOfUserId(userid);
+	g_DB.Format(query, sizeof(query), "INSERT INTO cccm_users (auth, tagtext) VALUES ('%s', '%s') ON DUPLICATE KEY UPDATE tagtext = '%s'", r.steamid, r.newtag, r.newtag);
+	CCC_SetTag(client, r.newtag);
+	g_DB.Query(SQL_SetTag, query);
 }
 
 // ======= [MENU HANDLERS] ======= //
@@ -347,11 +362,16 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
 	return 0;
 }
 
-public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) {
-
-}
+public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) { }
 
 // ======= [SQL CALLBACKS] ======= //
+
+public void SQL_SetTag(Database db, DBResultSet results, const char[] error, any data) {
+	if (db == null || results == null || error[0] != '\0') {
+		LogError("SQL_SetTag callback: %s", error);
+		return;
+	}
+}
 
 public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] error, DataPack pack) {
 	if (db == null || results == null || error[0] != '\0') {
@@ -365,8 +385,15 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
 	int client = GetClientOfUserId(pack.ReadCell());
 	delete pack;
 	
+	SetRequestState(g_SelectedRequest.steamid, state);
+
 	char phrase[32];
-	strcopy(phrase, sizeof(phrase), StrEqual(state, "approved") ? "TagApprovedAdmin" : "TagDeniedAdmin");
+	if (StrEqual(state, "approved")) {
+		strcopy(phrase, sizeof(phrase), "TagApprovedAdmin");
+	}
+	else if (StrEqual(state, "denied")) {
+		strcopy(phrase, sizeof(phrase), "TagDeniedAdmin");
+	}
 	if (client != 0) {
 		MC_PrintToChat(client, "%t", phrase, PREFIX, g_SelectedRequest.newtag);
 		CreateRequestsMenu(client);
