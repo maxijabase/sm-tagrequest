@@ -103,43 +103,45 @@ public Action CMD_TagRequest(int client, int args) {
 	g_Players.GetString(userid, steamid, sizeof(steamid));
 	
 	char requestedTag[32];
-	GetPendingTag(steamid, requestedTag, sizeof(requestedTag));
-	if (requestedTag[0] != '\0') {
-		MC_ReplyToCommand(client, "%t", "PendingRequest", PREFIX, requestedTag);
+	for (int i = 1; i <= GetCmdArgs(); i++) {
+		char buffer[32];
+		GetCmdArg(i, buffer, sizeof(buffer));
+		Format(buffer, sizeof(buffer), "%s ", buffer);
+		StrCat(requestedTag, sizeof(requestedTag), buffer);
+	}
+
+	char pendingTag[32];
+	GetPendingTag(steamid, pendingTag, sizeof(pendingTag));
+	if (pendingTag[0] != '\0') {
+		MC_ReplyToCommand(client, "%t", "PendingRequest", PREFIX, pendingTag);
 		return Plugin_Handled;
 	}
-	
+
+	char currentTag[32];
+	CCC_GetTag(client, currentTag, sizeof(currentTag));
+	if (StrEqual(requestedTag, currentTag)) {
+		MC_ReplyToCommand(client, "%t", "TagsAreEqual", PREFIX);
+		return Plugin_Handled;
+	}
+
 	if (args < 1) {
 		MC_ReplyToCommand(client, "%s sm_tagrequest <tag>", PREFIX);
 		return Plugin_Handled;
 	}
-	
+
 	Request req;
 	
-	// Get steamid
 	strcopy(req.steamid, sizeof(req.steamid), steamid);
-	
-	// Get name
 	GetClientName(client, req.name, sizeof(req.name));
-	
-	// Get current tag
-	CCC_GetTag(client, req.oldtag, sizeof(req.oldtag));
-	
-	// Get desired tag
-	for (int i = 1; i <= GetCmdArgs(); i++) {
-		char cusBuf[32];
-		GetCmdArg(i, cusBuf, sizeof(cusBuf));
-		Format(cusBuf, sizeof(cusBuf), "%s ", cusBuf);
-		StrCat(req.newtag, sizeof(req.newtag), cusBuf);
-	}
-	
-	// Set request state
+	strcopy(req.oldtag, sizeof(req.oldtag), currentTag);
+	strcopy(req.newtag, sizeof(req.newtag), requestedTag);
+
 	req.state = "pending";
 	
 	char query[256];
 	g_DB.Format(query, sizeof(query), 
 		"INSERT INTO tag_requests (steam_id, name, current_tag, desired_tag, datetime, state) VALUES " ...
-		"('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", steamid, req.name, req.oldtag, req.newtag, req.state);
+		"('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", req.steamid, req.name, req.oldtag, req.newtag, req.state);
 	
 	DataPack pack = new DataPack();
 	pack.WriteCell(GetClientUserId(client));
@@ -167,7 +169,6 @@ public Action CMD_SeeTagRequests(int client, int args) {
 void CacheRequests() {
 	
 	if (g_DB == null) {
-		Database.Connect(SQL_Connection, "cccm");
 		return;
 	}
 

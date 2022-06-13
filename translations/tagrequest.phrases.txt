@@ -12,6 +12,12 @@
 		"en" "{1} Your request for tag {yellow}{2}{default} has been sent successfully. Wait for admin response." 
 		"es" "{1} Solicitud de tag {yellow}{2}{default} enviada. Esperá a la respuesta de un admin."
 	}
+	"TagsAreEqual"
+	{
+		"#format" "{1:s}"
+		"en" "{1} The tag you requested cannot be the same as your current tag." 
+		"es" "{1} La tag que solicitaste es la misma que ya tenés."
+	}
 	"NoRequests"
 	{
 		"#format" "{1:s}"
