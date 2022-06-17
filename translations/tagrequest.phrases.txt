@@ -24,6 +24,12 @@
 		"en" "{1} No pending requests!"
 		"es" "{1} No hay solicitudes pendientes."
 	}
+	"ThereArePendingRequests" 
+	{
+		"#format" "{1:s},{2:N},{3:i}"
+		"en" "{1} Hello {green}{2}{default}! There are {orange}{3}{default} pending tag requests. Type {green}!seetagrequests{default} to see them."	
+		"es" "{1} ¡Hola, {green}{2}{default}! Hay {orange}{3}{default} solicitudes de tags pendientes. Escribe {green}!seetagrequests{default} para verlas."
+	}
 	"TagApprovedAdmin"
 	{
 		"#format" "{1:s},{2:s}"

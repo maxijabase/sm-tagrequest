@@ -217,18 +217,33 @@ void CheckPendingMessages(int userid) {
 	char steamid[32], user_id[16];
 	IntToString(userid, user_id, sizeof(user_id));
 	g_Players.GetString(user_id, steamid, sizeof(steamid));
+
+	int totalPendingRequests;
+	int client = GetClientOfUserId(userid);
+
 	for (int i = 0; i < g_Requests.Length; i++) {
 		Request r;
 		g_Requests.GetArray(i, r, sizeof(r));
-		if (StrEqual(r.steamid, steamid) && (StrEqual(r.state, "denied") || StrEqual(r.state, "approved"))) {
-			SendInfoPanel(userid, r.state);
-			g_SelectedRequest = r;
-			if (StrEqual(r.state, "approved")) {
-				SetClientTag(r, userid);
+
+		switch (r.state[0]) {
+			case 'p': {
+				totalPendingRequests++;
 			}
-			UpdateRequest("finished", 0);
-			return;
+
+			case 'd', 'a': {
+				SendInfoPanel(userid, r.state);
+				g_SelectedRequest = r;
+				if (r.state[0] == 'a') {
+					SetClientTag(r, userid);
+				}
+				UpdateRequest("finished", 0);
+			}
 		}
+	}
+	PrintToServer("PENDNG: %i", totalPendingRequests);
+	if (totalPendingRequests > 0 && CheckCommandAccess(client, "sm_admin", ADMFLAG_ROOT)) {
+		PrintToServer("SENDING TO %N", client);
+		MC_PrintToChat(client, "%t", "ThereArePendingRequests", PREFIX, client, totalPendingRequests);
 	}
 }
 
