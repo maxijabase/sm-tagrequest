@@ -1,12 +1,10 @@
 #include <sourcemod>
 #include <morecolors>
 #include <ccc>
-#include <cccm>
-#include "include/misc.inc"
+#include <xVip>
 
 #pragma semicolon 1
-
-#define PREFIX "{orange}[TagRequest]{default}"
+#pragma newdecls required
 
 Database g_DB;
 StringMap g_Players;
@@ -36,21 +34,20 @@ Request g_SelectedRequest;
 // ======= [FORWARDS] ======= //
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max) {
-  
   g_Late = late;
-  
+  return APLRes_Success;
 }
 
 public void OnPluginStart() {
-  Database.Connect(SQL_Connection, "cccm");
+  Database.Connect(SQL_Connection, "xVip");
   
   HookEvent("player_team", OnClientJoinTeam);
   
-  RegAdminCmd("sm_tagrequest", CMD_TagRequest, ADMFLAG_GENERIC, "Makes a tag change request.");
-  RegAdminCmd("sm_seetagrequests", CMD_SeeTagRequests, ADMFLAG_GENERIC, "Lists all the tag requests.");
+  RegConsoleCmd("sm_tagrequest", CMD_TagRequest, "Makes a tag change request.");
+  RegAdminCmd("sm_tagrequests", CMD_SeeTagRequests, ADMFLAG_GENERIC, "Lists all the tag requests.");
   
   LoadTranslations("common.phrases");
-  LoadTranslations("tagrequest.phrases");
+  LoadTranslations("xVip_tagrequest.phrases");
   
   g_Requests = new ArrayList(sizeof(Request));
   g_Players = new StringMap();
@@ -58,7 +55,7 @@ public void OnPluginStart() {
   if (g_Late) {
     for (int i = 1; i <= MaxClients; i++) {
       if (IsClientConnected(i)) {
-        OnClientAuthorized(i, "");
+        OnClientPostAdminCheck(i);
       }
     }
   }
@@ -68,19 +65,18 @@ public void OnMapStart() {
   CacheRequests();
 }
 
-public void OnClientAuthorized(int client, const char[] auth) {
+public void OnClientPostAdminCheck(int client) {
   g_Spawned[client] = false;
   
   char steamid[32], userid[64];
   GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
-  GetUserIdAsString(client, userid, sizeof(userid));
-  
+  IntToString(GetClientUserId(client), userid, sizeof(userid));
   g_Players.SetString(userid, steamid);
 }
 
 public void OnClientDisconnect(int client) {
   char userid[64];
-  GetUserIdAsString(client, userid, sizeof(userid));
+  IntToString(GetClientUserId(client), userid, sizeof(userid));
   g_Players.Remove(userid);
   g_Spawned[client] = false;
 }
@@ -98,8 +94,13 @@ public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast)
 // ======= [COMMANDS] ======= //
 
 public Action CMD_TagRequest(int client, int args) {
+  if (args == 0) {
+    MC_ReplyToCommand(client, "[xVip] Usage: sm_tagrequest <tag>");
+    return Plugin_Handled;
+  }
+  
   char userid[64], steamid[32];
-  GetUserIdAsString(client, userid, sizeof(userid));
+  IntToString(GetClientUserId(client), userid, sizeof(userid));
   g_Players.GetString(userid, steamid, sizeof(steamid));
   
   char requestedTag[32];
@@ -109,23 +110,19 @@ public Action CMD_TagRequest(int client, int args) {
     Format(buffer, sizeof(buffer), "%s ", buffer);
     StrCat(requestedTag, sizeof(requestedTag), buffer);
   }
+  TrimString(requestedTag);
   
   char pendingTag[32];
   GetPendingTag(steamid, pendingTag, sizeof(pendingTag));
   if (pendingTag[0] != '\0') {
-    MC_ReplyToCommand(client, "%t", "PendingRequest", PREFIX, pendingTag);
+    MC_ReplyToCommand(client, "[xVip] %t", "PendingRequest", pendingTag);
     return Plugin_Handled;
   }
   
   char currentTag[32];
   CCC_GetTag(client, currentTag, sizeof(currentTag));
   if (StrEqual(requestedTag, currentTag)) {
-    MC_ReplyToCommand(client, "%t", "TagsAreEqual", PREFIX);
-    return Plugin_Handled;
-  }
-  
-  if (args < 1) {
-    MC_ReplyToCommand(client, "%s sm_tagrequest <tag>", PREFIX);
+    MC_ReplyToCommand(client, "[xVip] %t", "TagsAreEqual");
     return Plugin_Handled;
   }
   
@@ -155,7 +152,7 @@ public Action CMD_TagRequest(int client, int args) {
 public Action CMD_SeeTagRequests(int client, int args) {
   
   if (g_Requests.Length == 0) {
-    MC_PrintToChat(client, "%t", "NoRequests", PREFIX);
+    MC_PrintToChat(client, "[xVip] %t", "NoRequests");
   }
   else {
     CreateRequestsMenu(client);
@@ -195,7 +192,7 @@ void CreateRequestsMenu(int client) {
   }
   
   if (menu.ItemCount == 0) {
-    MC_PrintToChat(client, "%t", "NoRequests", PREFIX);
+    MC_PrintToChat(client, "[xVip] %t", "NoRequests");
     delete menu;
     return;
   }
@@ -240,10 +237,8 @@ void CheckPendingMessages(int userid) {
       }
     }
   }
-  PrintToServer("PENDNG: %i", totalPendingRequests);
   if (totalPendingRequests > 0 && CheckCommandAccess(client, "sm_admin", ADMFLAG_ROOT)) {
-    PrintToServer("SENDING TO %N", client);
-    MC_PrintToChat(client, "%t", "ThereArePendingRequests", PREFIX, client, totalPendingRequests);
+    MC_PrintToChat(client, "[xVip] %t", "ThereArePendingRequests", client, totalPendingRequests);
   }
 }
 
@@ -298,10 +293,10 @@ void SetRequestState(const char[] steamid, const char[] state) {
 }
 
 void ShowRequestDetailsPanel(int client) {
-  Panel p = new Panel();
+  Panel panel = new Panel();
   char panelTitle[32];
   Format(panelTitle, sizeof(panelTitle), "%t", "Str_ShowingTagRequestOfUser", g_SelectedRequest.name);
-  p.SetTitle(panelTitle);
+  panel.SetTitle(panelTitle);
   
   char line1[64], line2[64], line3[64], time[64];
   
@@ -309,11 +304,11 @@ void ShowRequestDetailsPanel(int client) {
   Format(line2, sizeof(line2), "%t", "Str_NewTag", g_SelectedRequest.newtag);
   FormatTime(time, sizeof(time), "%b %d, %Y %R", g_SelectedRequest.timestamp);
   Format(line3, sizeof(line3), "%t", "Str_DateRequested", time);
-  p.DrawText(" ");
-  p.DrawText(line1);
-  p.DrawText(line2);
-  p.DrawText(line3);
-  p.DrawText(" ");
+  panel.DrawText(" ");
+  panel.DrawText(line1);
+  panel.DrawText(line2);
+  panel.DrawText(line3);
+  panel.DrawText(" ");
   
   char approve[32], deny[32], back[16], exitStr[16];
   
@@ -321,13 +316,13 @@ void ShowRequestDetailsPanel(int client) {
   Format(deny, sizeof(deny), "%t", "Str_DenyTag");
   Format(back, sizeof(back), "%t", "Str_Back");
   Format(exitStr, sizeof(exitStr), "%t", "Str_Exit");
-  p.DrawItem(approve);
-  p.DrawItem(deny);
-  p.CurrentKey = 9;
-  p.DrawItem(back);
-  p.DrawItem(exitStr);
+  panel.DrawItem(approve);
+  panel.DrawItem(deny);
+  panel.CurrentKey = 9;
+  panel.DrawItem(back);
+  panel.DrawItem(exitStr);
   
-  p.Send(client, RequestDetailsPanelHandler, MENU_TIME_FOREVER);
+  panel.Send(client, RequestDetailsPanelHandler, MENU_TIME_FOREVER);
 }
 
 void SetClientTag(Request r, int userid) {
@@ -378,7 +373,7 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
   return 0;
 }
 
-public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) {  }
+public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) { return 0; }
 
 // ======= [SQL CALLBACKS] ======= //
 
@@ -398,7 +393,7 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
   pack.Reset();
   char state[16];
   pack.ReadString(state, sizeof(state));
-  int client = GetClientOfUserId(pack.ReadCell());
+  int admin_client = GetClientOfUserId(pack.ReadCell());
   delete pack;
   
   SetRequestState(g_SelectedRequest.steamid, state);
@@ -406,13 +401,18 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
   char phrase[32];
   if (StrEqual(state, "approved")) {
     strcopy(phrase, sizeof(phrase), "TagApprovedAdmin");
+    int userid = GetUserIDBySteamID(g_SelectedRequest.steamid);
+    int client = GetClientOfUserId(userid);
+    if (IsValidClient(client)) {
+      CCC_SetTag(client, g_SelectedRequest.newtag);
+    }
   }
   else if (StrEqual(state, "denied")) {
     strcopy(phrase, sizeof(phrase), "TagDeniedAdmin");
   }
-  if (client != 0) {
-    MC_PrintToChat(client, "%t", phrase, PREFIX, g_SelectedRequest.newtag);
-    CreateRequestsMenu(client);
+  if (admin_client != 0) {
+    MC_PrintToChat(admin_client, "[xVip] %t", phrase, g_SelectedRequest.newtag);
+    CreateRequestsMenu(admin_client);
   }
 }
 
@@ -493,7 +493,7 @@ public void SQL_InsertRequest(Database db, DBResultSet results, const char[] err
   }
   
   g_Requests.PushArray(req);
-  MC_PrintToChat(client, "%t", "RequestSent", PREFIX, req.newtag);
+  MC_PrintToChat(client, "[xVip] %t", "RequestSent", req.newtag);
   
   delete results;
 } 
