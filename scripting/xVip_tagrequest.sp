@@ -12,7 +12,7 @@ bool g_Late;
 bool g_Spawned[MAXPLAYERS];
 
 public Plugin myinfo = {
-  name = "Tag Request", 
+  name = "xVip - Tag Request", 
   author = "ampere", 
   description = "Allows players to submit a CCC tag request for admins to approve or deny.", 
   version = "1.0", 
@@ -94,6 +94,11 @@ public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast)
 // ======= [COMMANDS] ======= //
 
 public Action CMD_TagRequest(int client, int args) {
+  if (!xVip_IsVip(client)) {
+    MC_ReplyToCommand(client, "[xVip] %t", "NotVip");
+    return Plugin_Handled;
+  }
+
   if (args == 0) {
     MC_ReplyToCommand(client, "[xVip] Usage: sm_tagrequest <tag>");
     return Plugin_Handled;
@@ -110,7 +115,6 @@ public Action CMD_TagRequest(int client, int args) {
     Format(buffer, sizeof(buffer), "%s ", buffer);
     StrCat(requestedTag, sizeof(requestedTag), buffer);
   }
-  TrimString(requestedTag);
   
   char pendingTag[32];
   GetPendingTag(steamid, pendingTag, sizeof(pendingTag));
@@ -137,7 +141,7 @@ public Action CMD_TagRequest(int client, int args) {
   
   char query[256];
   g_DB.Format(query, sizeof(query), 
-    "INSERT INTO tag_requests (steam_id, name, current_tag, desired_tag, datetime, state) VALUES "...
+    "INSERT INTO xVip_tagrequests (steam_id, name, current_tag, desired_tag, timestamp, state) VALUES "...
     "('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", req.steamid, req.name, req.oldtag, req.newtag, req.state);
   
   DataPack pack = new DataPack();
@@ -172,7 +176,7 @@ void CacheRequests() {
   g_Requests.Clear();
   
   char query[128];
-  g_DB.Format(query, sizeof(query), "SELECT * FROM tag_requests WHERE state != 'finished'");
+  g_DB.Format(query, sizeof(query), "SELECT * FROM xVip_tagrequests WHERE state != 'finished'");
   
   g_DB.Query(SQL_CacheRequests, query);
 }
@@ -248,7 +252,7 @@ void UpdateRequest(char[] state, int userid) {
   }
   
   char query[256];
-  g_DB.Format(query, sizeof(query), "UPDATE tag_requests SET state = '%s' WHERE steam_id = '%s' AND desired_tag = '%s'"...
+  g_DB.Format(query, sizeof(query), "UPDATE xVip_tagrequests SET state = '%s' WHERE steam_id = '%s' AND desired_tag = '%s'"...
     "ORDER BY id DESC LIMIT 1", state, g_SelectedRequest.steamid, g_SelectedRequest.newtag);
   
   DataPack pack = new DataPack();
@@ -431,7 +435,7 @@ public void SQL_CacheRequests(Database db, DBResultSet results, const char[] err
   results.FieldNameToNum("name", nameCol);
   results.FieldNameToNum("current_tag", currtagCol);
   results.FieldNameToNum("desired_tag", wantedtagCol);
-  results.FieldNameToNum("datetime", timestampCol);
+  results.FieldNameToNum("timestamp", timestampCol);
   results.FieldNameToNum("state", stateCol);
   
   while (results.FetchRow()) {
@@ -453,17 +457,15 @@ public void SQL_Connection(Database db, const char[] error, any data) {
     return;
   }
   
-  LogMessage("Connection successful.");
-  
   g_DB = db;
   char tablesQuery[256] = 
-  "CREATE TABLE IF NOT EXISTS tag_requests "...
+  "CREATE TABLE IF NOT EXISTS xVip_tagrequests "...
   "(id INT NOT NULL AUTO_INCREMENT, "...
   "steam_id VARCHAR(32), "...
   "name VARCHAR(32), "...
   "current_tag VARCHAR(32), "...
   "desired_tag VARCHAR(32), "...
-  "datetime VARCHAR(32), "...
+  "timestamp int, "...
   "state VARCHAR(32), "...
   "PRIMARY KEY(id));";
   

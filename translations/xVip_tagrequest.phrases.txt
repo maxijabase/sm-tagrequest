@@ -1,5 +1,10 @@
 "Phrases"
 {
+	"NotVip"
+	{
+		"en" "You need to be a VIP to request a tag." 
+		"es" "Necesitas ser VIP para solicitar una tag."
+	}
 	"PendingRequest"
 	{
 		"#format" "{1:s}"
