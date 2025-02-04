@@ -95,12 +95,12 @@ public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast)
 
 public Action CMD_TagRequest(int client, int args) {
   if (!xVip_IsVip(client)) {
-    MC_ReplyToCommand(client, "[xVip] %t", "NotVip");
+    xVip_Reply(client, "%t", "NotVip");
     return Plugin_Handled;
   }
 
   if (args == 0) {
-    MC_ReplyToCommand(client, "[xVip] Usage: sm_tagrequest <tag>");
+    xVip_Reply(client, "Usage: sm_tagrequest <tag>");
     return Plugin_Handled;
   }
   
@@ -119,14 +119,14 @@ public Action CMD_TagRequest(int client, int args) {
   char pendingTag[32];
   GetPendingTag(steamid, pendingTag, sizeof(pendingTag));
   if (pendingTag[0] != '\0') {
-    MC_ReplyToCommand(client, "[xVip] %t", "PendingRequest", pendingTag);
+    xVip_Reply(client, "%t", "PendingRequest", pendingTag);
     return Plugin_Handled;
   }
   
   char currentTag[32];
   CCC_GetTag(client, currentTag, sizeof(currentTag));
   if (StrEqual(requestedTag, currentTag)) {
-    MC_ReplyToCommand(client, "[xVip] %t", "TagsAreEqual");
+    xVip_Reply(client, "%t", "TagsAreEqual");
     return Plugin_Handled;
   }
   
@@ -156,7 +156,7 @@ public Action CMD_TagRequest(int client, int args) {
 public Action CMD_SeeTagRequests(int client, int args) {
   
   if (g_Requests.Length == 0) {
-    MC_PrintToChat(client, "[xVip] %t", "NoRequests");
+    xVip_Reply(client, "%t", "NoRequests");
   }
   else {
     CreateRequestsMenu(client);
@@ -196,7 +196,7 @@ void CreateRequestsMenu(int client) {
   }
   
   if (menu.ItemCount == 0) {
-    MC_PrintToChat(client, "[xVip] %t", "NoRequests");
+    xVip_Reply(client, "%t", "NoRequests");
     delete menu;
     return;
   }
@@ -242,7 +242,7 @@ void CheckPendingMessages(int userid) {
     }
   }
   if (totalPendingRequests > 0 && CheckCommandAccess(client, "sm_admin", ADMFLAG_ROOT)) {
-    MC_PrintToChat(client, "[xVip] %t", "ThereArePendingRequests", client, totalPendingRequests);
+    xVip_Reply(client, "%t", "ThereArePendingRequests", client, totalPendingRequests);
   }
 }
 
@@ -415,7 +415,7 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
     strcopy(phrase, sizeof(phrase), "TagDeniedAdmin");
   }
   if (admin_client != 0) {
-    MC_PrintToChat(admin_client, "[xVip] %t", phrase, g_SelectedRequest.newtag);
+    xVip_Reply(admin_client, "%t", phrase, g_SelectedRequest.newtag);
     CreateRequestsMenu(admin_client);
   }
 }
@@ -495,7 +495,7 @@ public void SQL_InsertRequest(Database db, DBResultSet results, const char[] err
   }
   
   g_Requests.PushArray(req);
-  MC_PrintToChat(client, "[xVip] %t", "RequestSent", req.newtag);
+  xVip_Reply(client, "%t", "RequestSent", req.newtag);
   
   delete results;
 } 
