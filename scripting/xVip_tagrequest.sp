@@ -1,5 +1,4 @@
 #include <sourcemod>
-#include <morecolors>
 #include <ccc>
 #include <xVip>
 
@@ -9,17 +8,17 @@
 Database g_DB;
 StringMap g_Players;
 bool g_Late;
-bool g_Spawned[MAXPLAYERS];
+bool g_Spawned[MAXPLAYERS + 1];
 
 public Plugin myinfo = {
   name = "xVip - Tag Request", 
   author = "ampere", 
   description = "Allows players to submit a CCC tag request for admins to approve or deny.", 
-  version = "1.0", 
+  version = "1.1",
   url = "github.com/maxijabase"
 }
 
-enum struct Request {
+enum struct TagRequest {
   char steamid[32];
   char name[MAX_NAME_LENGTH];
   char oldtag[32];
@@ -29,7 +28,7 @@ enum struct Request {
 }
 
 ArrayList g_Requests;
-Request g_SelectedRequest;
+TagRequest g_SelectedRequest;
 
 // ======= [FORWARDS] ======= //
 
@@ -49,7 +48,7 @@ public void OnPluginStart() {
   LoadTranslations("common.phrases");
   LoadTranslations("xVip_tagrequest.phrases");
   
-  g_Requests = new ArrayList(sizeof(Request));
+  g_Requests = new ArrayList(sizeof(TagRequest));
   g_Players = new StringMap();
   
   if (g_Late) {
@@ -69,7 +68,10 @@ public void OnClientPostAdminCheck(int client) {
   g_Spawned[client] = false;
   
   char steamid[32], userid[64];
-  GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid));
+  if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
+    return;
+  }
+  
   IntToString(GetClientUserId(client), userid, sizeof(userid));
   g_Players.SetString(userid, steamid);
 }
@@ -83,7 +85,12 @@ public void OnClientDisconnect(int client) {
 
 public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast) {
   int userid = event.GetInt("userid");
-  int client = GetClientOfUserId(event.GetInt("userid"));
+  int client = GetClientOfUserId(userid);
+  
+  if (!IsValidClient(client)) {
+    return;
+  }
+  
   if (g_Spawned[client]) {
     return;
   }
@@ -94,6 +101,10 @@ public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast)
 // ======= [COMMANDS] ======= //
 
 public Action CMD_TagRequest(int client, int args) {
+  if (!IsValidClient(client)) {
+    return Plugin_Handled;
+  }
+  
   if (!xVip_IsVip(client)) {
     xVip_Reply(client, "%t", "NotVip");
     return Plugin_Handled;
@@ -106,14 +117,18 @@ public Action CMD_TagRequest(int client, int args) {
   
   char userid[64], steamid[32];
   IntToString(GetClientUserId(client), userid, sizeof(userid));
-  g_Players.GetString(userid, steamid, sizeof(steamid));
+  
+  if (!g_Players.GetString(userid, steamid, sizeof(steamid))) {
+    xVip_Reply(client, "Error: Could not retrieve your Steam ID. Please reconnect.");
+    return Plugin_Handled;
+  }
   
   char requestedTag[32];
-  for (int i = 1; i <= GetCmdArgs(); i++) {
-    char buffer[32];
-    GetCmdArg(i, buffer, sizeof(buffer));
-    Format(buffer, sizeof(buffer), "%s ", buffer);
-    StrCat(requestedTag, sizeof(requestedTag), buffer);
+  GetCmdArgString(requestedTag, sizeof(requestedTag));
+  
+  if (requestedTag[0] == '\0') {
+    xVip_Reply(client, "Error: Tag cannot be empty.");
+    return Plugin_Handled;
   }
   
   char pendingTag[32];
@@ -130,19 +145,33 @@ public Action CMD_TagRequest(int client, int args) {
     return Plugin_Handled;
   }
   
-  Request req;
+  TagRequest req;
   
   strcopy(req.steamid, sizeof(req.steamid), steamid);
   GetClientName(client, req.name, sizeof(req.name));
   strcopy(req.oldtag, sizeof(req.oldtag), currentTag);
   strcopy(req.newtag, sizeof(req.newtag), requestedTag);
+  req.timestamp = GetTime();
+  strcopy(req.state, sizeof(req.state), "pending");
   
-  req.state = "pending";
+  char query[512];
+  char escapedName[MAX_NAME_LENGTH*2+1];
+  char escapedOldTag[64+1];
+  char escapedNewTag[64+1];
   
-  char query[256];
+  if (g_DB == null) {
+    xVip_Reply(client, "Error: Database connection not available. Try again later.");
+    return Plugin_Handled;
+  }
+  
+  g_DB.Escape(req.name, escapedName, sizeof(escapedName));
+  g_DB.Escape(req.oldtag, escapedOldTag, sizeof(escapedOldTag));
+  g_DB.Escape(req.newtag, escapedNewTag, sizeof(escapedNewTag));
+  
   g_DB.Format(query, sizeof(query), 
-    "INSERT INTO xVip_tagrequests (steam_id, name, current_tag, desired_tag, timestamp, state) VALUES "...
-    "('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", req.steamid, req.name, req.oldtag, req.newtag, req.state);
+    "INSERT INTO xVip_tagrequests (steamid, name, current_tag, desired_tag, timestamp, state) VALUES "...
+    "('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", 
+    req.steamid, escapedName, escapedOldTag, escapedNewTag, req.state);
   
   DataPack pack = new DataPack();
   pack.WriteCell(GetClientUserId(client));
@@ -154,6 +183,9 @@ public Action CMD_TagRequest(int client, int args) {
 }
 
 public Action CMD_SeeTagRequests(int client, int args) {
+  if (!IsValidClient(client)) {
+    return Plugin_Handled;
+  }
   
   if (g_Requests.Length == 0) {
     xVip_Reply(client, "%t", "NoRequests");
@@ -168,8 +200,8 @@ public Action CMD_SeeTagRequests(int client, int args) {
 // ======= [METHODS] ======= //
 
 void CacheRequests() {
-  
   if (g_DB == null) {
+    LogError("CacheRequests: Database connection not available");
     return;
   }
   
@@ -186,13 +218,14 @@ void CreateRequestsMenu(int client) {
   menu.SetTitle("%t", "Str_TagRequests");
   
   for (int i = 0; i < g_Requests.Length; i++) {
-    Request req;
+    TagRequest req;
     g_Requests.GetArray(i, req, sizeof(req));
     
     if (StrEqual(req.state, "pending")) {
-      menu.AddItem(req.steamid, req.name);
+      char indexStr[16];
+      IntToString(i, indexStr, sizeof(indexStr));
+      menu.AddItem(indexStr, req.name);
     }
-    
   }
   
   if (menu.ItemCount == 0) {
@@ -205,55 +238,70 @@ void CreateRequestsMenu(int client) {
 }
 
 void GetPendingTag(const char[] steamid, char[] buffer, int maxsize) {
+  TagRequest req;
   for (int i = 0; i < g_Requests.Length; i++) {
-    Request r;
-    g_Requests.GetArray(i, r, sizeof(r));
-    if (StrEqual(r.steamid, steamid) && !StrEqual(r.state, "finished")) {
-      strcopy(buffer, maxsize, r.newtag);
+    g_Requests.GetArray(i, req, sizeof(req));
+    if (StrEqual(req.steamid, steamid) && !StrEqual(req.state, "finished")) {
+      strcopy(buffer, maxsize, req.newtag);
+      return;
     }
   }
+  buffer[0] = '\0';
 }
 
 void CheckPendingMessages(int userid) {
   char steamid[32], user_id[16];
   IntToString(userid, user_id, sizeof(user_id));
-  g_Players.GetString(user_id, steamid, sizeof(steamid));
   
-  int totalPendingRequests;
+  if (!g_Players.GetString(user_id, steamid, sizeof(steamid))) {
+    return;
+  }
+  
+  int totalPendingRequests = 0;
   int client = GetClientOfUserId(userid);
   
+  if (!IsValidClient(client)) {
+    return;
+  }
+  
   for (int i = 0; i < g_Requests.Length; i++) {
-    Request r;
-    g_Requests.GetArray(i, r, sizeof(r));
+    TagRequest req;
+    g_Requests.GetArray(i, req, sizeof(req));
     
-    switch (r.state[0]) {
-      case 'p': {
-        totalPendingRequests++;
-      }
-      
-      case 'd', 'a': {
-        SendInfoPanel(userid, r.state);
-        g_SelectedRequest = r;
-        if (r.state[0] == 'a') {
-          SetClientTag(r, userid);
+    if (StrEqual(req.steamid, steamid)) {
+      switch (req.state[0]) {
+        case 'p': {
+          totalPendingRequests++;
         }
-        UpdateRequest("finished", 0);
+        
+        case 'd', 'a': {
+          SendInfoPanel(userid, req.state);
+          g_SelectedRequest = req;
+          if (req.state[0] == 'a') {
+            SetClientTag(req, userid);
+          }
+          UpdateRequest("finished", 0);
+        }
       }
     }
   }
-  if (totalPendingRequests > 0 && CheckCommandAccess(client, "sm_admin", ADMFLAG_ROOT)) {
-    xVip_Reply(client, "%t", "ThereArePendingRequests", client, totalPendingRequests);
+  
+  if (totalPendingRequests > 0 && CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)) {
+    xVip_Reply(client, "%t", "ThereArePendingRequests", totalPendingRequests);
   }
 }
 
 void UpdateRequest(char[] state, int userid) {
   if (g_DB == null) {
+    LogError("UpdateRequest: Database connection not available");
     return;
   }
   
-  char query[256];
-  g_DB.Format(query, sizeof(query), "UPDATE xVip_tagrequests SET state = '%s' WHERE steam_id = '%s' AND desired_tag = '%s'"...
-    "ORDER BY id DESC LIMIT 1", state, g_SelectedRequest.steamid, g_SelectedRequest.newtag);
+  char query[512];
+  g_DB.Format(query, sizeof(query), 
+    "UPDATE xVip_tagrequests SET state = '%s' WHERE steamid = '%s' AND desired_tag = '%s' "...
+    "AND timestamp = (SELECT MAX(timestamp) FROM xVip_tagrequests t2 WHERE t2.steamid = '%s' AND t2.desired_tag = '%s')", 
+    state, g_SelectedRequest.steamid, g_SelectedRequest.newtag, g_SelectedRequest.steamid, g_SelectedRequest.newtag);
   
   DataPack pack = new DataPack();
   pack.WriteString(state);
@@ -263,8 +311,11 @@ void UpdateRequest(char[] state, int userid) {
 }
 
 void SendInfoPanel(int userid, const char[] state) {
-  
   int client = GetClientOfUserId(userid);
+  
+  if (!IsValidClient(client)) {
+    return;
+  }
   
   Panel panel = new Panel();
   panel.SetTitle("Tag Request");
@@ -281,15 +332,15 @@ void SendInfoPanel(int userid, const char[] state) {
 
 void SetRequestState(const char[] steamid, const char[] state) {
   for (int i = 0; i < g_Requests.Length; i++) {
-    Request r;
-    g_Requests.GetArray(i, r, sizeof(r));
-    if (StrEqual(r.steamid, steamid)) {
+    TagRequest req;
+    g_Requests.GetArray(i, req, sizeof(req));
+    if (StrEqual(req.steamid, steamid) && StrEqual(req.newtag, g_SelectedRequest.newtag)) {
       if (StrEqual(state, "finished")) {
         g_Requests.Erase(i);
       }
       else {
-        strcopy(r.state, sizeof(r.state), state);
-        g_Requests.SetArray(i, r, sizeof(r));
+        strcopy(req.state, sizeof(req.state), state);
+        g_Requests.SetArray(i, req, sizeof(req));
       }
       return;
     }
@@ -329,11 +380,27 @@ void ShowRequestDetailsPanel(int client) {
   panel.Send(client, RequestDetailsPanelHandler, MENU_TIME_FOREVER);
 }
 
-void SetClientTag(Request r, int userid) {
-  char query[256];
+void SetClientTag(TagRequest req, int userid) {
+  if (g_DB == null) {
+    LogError("SetClientTag: Database connection not available");
+    return;
+  }
+  
   int client = GetClientOfUserId(userid);
-  g_DB.Format(query, sizeof(query), "INSERT INTO cccm_users (auth, tagtext) VALUES ('%s', '%s') ON DUPLICATE KEY UPDATE tagtext = '%s'", r.steamid, r.newtag, r.newtag);
-  CCC_SetTag(client, r.newtag);
+  
+  if (!IsValidClient(client)) {
+    return;
+  }
+  
+  char escaped_tag[64];
+  g_DB.Escape(req.newtag, escaped_tag, sizeof(escaped_tag));
+  
+  char query[512];
+  g_DB.Format(query, sizeof(query), 
+    "INSERT INTO cccm_users (steamid, tagtext) VALUES ('%s', '%s') ON DUPLICATE KEY UPDATE tagtext = '%s'", 
+    req.steamid, escaped_tag, escaped_tag);
+  
+  CCC_SetTag(client, req.newtag);
   g_DB.Query(SQL_SetTag, query);
 }
 
@@ -342,8 +409,17 @@ void SetClientTag(Request r, int userid) {
 public int RequestsMenuHandler(Menu menu, MenuAction action, int client, int param2) {
   switch (action) {
     case MenuAction_Select: {
-      g_Requests.GetArray(param2, g_SelectedRequest, sizeof(g_SelectedRequest));
-      ShowRequestDetailsPanel(client);
+      char indexStr[16];
+      menu.GetItem(param2, indexStr, sizeof(indexStr));
+      int index = StringToInt(indexStr);
+      
+      if (index >= 0 && index < g_Requests.Length) {
+        g_Requests.GetArray(index, g_SelectedRequest, sizeof(g_SelectedRequest));
+        ShowRequestDetailsPanel(client);
+      } else {
+        xVip_Reply(client, "Error: The selected request is no longer available.");
+        CreateRequestsMenu(client);
+      }
     }
     case MenuAction_End: {
       delete menu;
@@ -365,7 +441,7 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
         case 9: {
           CreateRequestsMenu(param1);
         }
-        case 10: {
+        default: {
           delete menu;
         }
       }
@@ -377,20 +453,26 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
   return 0;
 }
 
-public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) { return 0; }
+public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) { 
+  if (action == MenuAction_End) {
+    delete menu;
+  }
+  return 0; 
+}
 
 // ======= [SQL CALLBACKS] ======= //
 
 public void SQL_SetTag(Database db, DBResultSet results, const char[] error, any data) {
-  if (db == null || results == null || error[0] != '\0') {
+  if (db == null || error[0] != '\0') {
     LogError("SQL_SetTag callback: %s", error);
     return;
   }
 }
 
 public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] error, DataPack pack) {
-  if (db == null || results == null || error[0] != '\0') {
+  if (db == null || error[0] != '\0') {
     LogError("StatusUpdate callback: %s", error);
+    delete pack;
     return;
   }
   
@@ -414,14 +496,15 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
   else if (StrEqual(state, "denied")) {
     strcopy(phrase, sizeof(phrase), "TagDeniedAdmin");
   }
-  if (admin_client != 0) {
+  
+  if (admin_client > 0 && IsClientInGame(admin_client)) {
     xVip_Reply(admin_client, "%t", phrase, g_SelectedRequest.newtag);
     CreateRequestsMenu(admin_client);
   }
 }
 
 public void SQL_CacheRequests(Database db, DBResultSet results, const char[] error, any data) {
-  if (db == null || results == null || error[0] != '\0') {
+  if (db == null || error[0] != '\0') {
     LogError("Cache requests callback: %s", error);
     return;
   }
@@ -431,7 +514,7 @@ public void SQL_CacheRequests(Database db, DBResultSet results, const char[] err
   }
   
   int steamidCol, nameCol, currtagCol, wantedtagCol, timestampCol, stateCol;
-  results.FieldNameToNum("steam_id", steamidCol);
+  results.FieldNameToNum("steamid", steamidCol);
   results.FieldNameToNum("name", nameCol);
   results.FieldNameToNum("current_tag", currtagCol);
   results.FieldNameToNum("desired_tag", wantedtagCol);
@@ -439,7 +522,7 @@ public void SQL_CacheRequests(Database db, DBResultSet results, const char[] err
   results.FieldNameToNum("state", stateCol);
   
   while (results.FetchRow()) {
-    Request req;
+    TagRequest req;
     results.FetchString(steamidCol, req.steamid, sizeof(req.steamid));
     results.FetchString(nameCol, req.name, sizeof(req.name));
     results.FetchString(currtagCol, req.oldtag, sizeof(req.oldtag));
@@ -458,16 +541,18 @@ public void SQL_Connection(Database db, const char[] error, any data) {
   }
   
   g_DB = db;
-  char tablesQuery[256] = 
+  char tablesQuery[512] = 
   "CREATE TABLE IF NOT EXISTS xVip_tagrequests "...
   "(id INT NOT NULL AUTO_INCREMENT, "...
-  "steam_id VARCHAR(32), "...
-  "name VARCHAR(32), "...
+  "steamid VARCHAR(32), "...
+  "name VARCHAR(64), "...
   "current_tag VARCHAR(32), "...
   "desired_tag VARCHAR(32), "...
   "timestamp int, "...
   "state VARCHAR(32), "...
-  "PRIMARY KEY(id));";
+  "PRIMARY KEY(id), "...
+  "INDEX(steamid), "...
+  "INDEX(state));";
   
   g_DB.Query(SQL_Tables, tablesQuery);
 }
@@ -477,25 +562,38 @@ public void SQL_Tables(Database db, DBResultSet results, const char[] error, any
     LogError("Tables callback: %s", error);
     return;
   }
-  if (results.AffectedRows > 0) {
-    LogMessage("Tables creation successful.");
-  }
+  
+  LogMessage("Database tables verified successfully.");
+  
+  CacheRequests();
 }
 
 public void SQL_InsertRequest(Database db, DBResultSet results, const char[] error, DataPack pack) {
   pack.Reset();
   int client = GetClientOfUserId(pack.ReadCell());
-  Request req;
+  TagRequest req;
   pack.ReadCellArray(req, sizeof(req));
   delete pack;
   
   if (db == null || error[0] != '\0') {
     LogError("Insert request callback for %N: %s", client, error);
+    if (IsValidClient(client)) {
+      xVip_Reply(client, "Error: Could not submit your tag request. Please try again later.");
+    }
     return;
   }
   
   g_Requests.PushArray(req);
+  
+  if (!IsValidClient(client)) {
+    return;
+  }
+  
   xVip_Reply(client, "%t", "RequestSent", req.newtag);
   
-  delete results;
-} 
+  for (int i = 1; i <= MaxClients; i++) {
+    if (IsValidClient(i) && CheckCommandAccess(i, "sm_admin", ADMFLAG_GENERIC)) {
+      xVip_Reply(i, "%t", "NewTagRequest", req.name, req.newtag);
+    }
+  }
+}
