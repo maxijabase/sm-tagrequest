@@ -2,6 +2,11 @@
 #include <ccc>
 #include <xVip>
 
+#undef REQUIRE_PLUGIN
+#include <updater>
+
+#define UPDATE_URL "https://raw.githubusercontent.com/maxijabase/xVip_tagrequest/master/updatefile.txt"
+
 #pragma semicolon 1
 #pragma newdecls required
 
@@ -13,23 +18,21 @@ public Plugin myinfo = {
   name = "xVip - Tag Request", 
   author = "ampere", 
   description = "Allows players to submit a CCC tag request for admins to approve or deny.", 
-  version = "1.2",
+  version = "1.2", 
   url = "github.com/maxijabase"
 }
 
-// Standardized request state enum
 enum RequestState {
-  RequestState_Pending = 0,
-  RequestState_Approved,
-  RequestState_Denied,
+  RequestState_Pending = 0, 
+  RequestState_Approved, 
+  RequestState_Denied, 
   RequestState_Finished
 };
 
-// String representations of request states (for database)
 char g_RequestStateNames[][] = {
-  "pending",
-  "approved",
-  "denied",
+  "pending", 
+  "approved", 
+  "denied", 
   "finished"
 };
 
@@ -64,6 +67,10 @@ public void OnPluginStart() {
   LoadTranslations("xVip_tagrequest.phrases");
   
   g_Requests = new ArrayList(sizeof(TagRequest));
+}
+
+public void Updater_OnLoaded() {
+  Updater_AddPlugin(UPDATE_URL);
 }
 
 public void OnMapStart() {
@@ -104,7 +111,7 @@ public Action CMD_TagRequest(int client, int args) {
     xVip_Reply(client, "%t", "NotVip");
     return Plugin_Handled;
   }
-
+  
   if (args == 0) {
     xVip_Reply(client, "Usage: sm_tagrequest <tag>");
     return Plugin_Handled;
@@ -148,9 +155,9 @@ public Action CMD_TagRequest(int client, int args) {
   req.state = RequestState_Pending;
   
   char query[512];
-  char escapedName[MAX_NAME_LENGTH*2+1];
-  char escapedOldTag[64+1];
-  char escapedNewTag[64+1];
+  char escapedName[MAX_NAME_LENGTH * 2 + 1];
+  char escapedOldTag[64 + 1];
+  char escapedNewTag[64 + 1];
   
   if (g_DB == null) {
     xVip_Reply(client, "Error: Database connection not available. Try again later.");
@@ -163,7 +170,7 @@ public Action CMD_TagRequest(int client, int args) {
   
   TrimString(req.newtag);
   Format(req.newtag, sizeof(req.newtag), "%s ", req.newtag);
-
+  
   g_DB.Format(query, sizeof(query), 
     "INSERT INTO xVip_tagrequests (steamid, name, current_tag, desired_tag, timestamp, state) VALUES "...
     "('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", 
@@ -458,11 +465,11 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
   return 0;
 }
 
-public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) { 
+public int EmptyHandler(Menu menu, MenuAction action, int param1, int param2) {
   if (action == MenuAction_End) {
     delete menu;
   }
-  return 0; 
+  return 0;
 }
 
 // ======= [SQL CALLBACKS] ======= //
@@ -588,8 +595,6 @@ public void SQL_Tables(Database db, DBResultSet results, const char[] error, any
     return;
   }
   
-  LogMessage("Database tables verified successfully.");
-  
   if (g_Late) {
     for (int i = 1; i <= MaxClients; i++) {
       if (IsValidClient(i)) {
@@ -597,7 +602,7 @@ public void SQL_Tables(Database db, DBResultSet results, const char[] error, any
       }
     }
   }
-
+  
   CacheRequests();
 }
 
@@ -629,4 +634,4 @@ public void SQL_InsertRequest(Database db, DBResultSet results, const char[] err
       xVip_Reply(i, "%t", "NewTagRequest", req.name, req.newtag);
     }
   }
-}
+} 

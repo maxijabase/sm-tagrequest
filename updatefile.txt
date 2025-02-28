@@ -1,0 +1,16 @@
+"Updater"
+{
+	"Information"
+	{
+		"Version"
+		{
+			"Latest"	"1.2"
+		}
+	}
+	
+	"Files"
+	{
+		"Plugin"	"Path_SM/plugins/xVip_tagrequest.smx"		
+		"Source"	"Path_SM/scripting/xVip_tagrequest.sp"
+	}
+}
