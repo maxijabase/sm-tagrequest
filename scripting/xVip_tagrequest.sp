@@ -6,7 +6,6 @@
 #pragma newdecls required
 
 Database g_DB;
-StringMap g_Players;
 bool g_Late;
 bool g_Spawned[MAXPLAYERS + 1];
 
@@ -14,9 +13,25 @@ public Plugin myinfo = {
   name = "xVip - Tag Request", 
   author = "ampere", 
   description = "Allows players to submit a CCC tag request for admins to approve or deny.", 
-  version = "1.1",
+  version = "1.2",
   url = "github.com/maxijabase"
 }
+
+// Standardized request state enum
+enum RequestState {
+  RequestState_Pending = 0,
+  RequestState_Approved,
+  RequestState_Denied,
+  RequestState_Finished
+};
+
+// String representations of request states (for database)
+char g_RequestStateNames[][] = {
+  "pending",
+  "approved",
+  "denied",
+  "finished"
+};
 
 enum struct TagRequest {
   char steamid[32];
@@ -24,7 +39,7 @@ enum struct TagRequest {
   char oldtag[32];
   char newtag[32];
   int timestamp;
-  char state[16];
+  RequestState state;
 }
 
 ArrayList g_Requests;
@@ -49,15 +64,6 @@ public void OnPluginStart() {
   LoadTranslations("xVip_tagrequest.phrases");
   
   g_Requests = new ArrayList(sizeof(TagRequest));
-  g_Players = new StringMap();
-  
-  if (g_Late) {
-    for (int i = 1; i <= MaxClients; i++) {
-      if (IsClientConnected(i)) {
-        OnClientPostAdminCheck(i);
-      }
-    }
-  }
 }
 
 public void OnMapStart() {
@@ -66,20 +72,9 @@ public void OnMapStart() {
 
 public void OnClientPostAdminCheck(int client) {
   g_Spawned[client] = false;
-  
-  char steamid[32], userid[64];
-  if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
-    return;
-  }
-  
-  IntToString(GetClientUserId(client), userid, sizeof(userid));
-  g_Players.SetString(userid, steamid);
 }
 
 public void OnClientDisconnect(int client) {
-  char userid[64];
-  IntToString(GetClientUserId(client), userid, sizeof(userid));
-  g_Players.Remove(userid);
   g_Spawned[client] = false;
 }
 
@@ -94,7 +89,7 @@ public void OnClientJoinTeam(Event event, const char[] name, bool dontBroadcast)
   if (g_Spawned[client]) {
     return;
   }
-  CheckPendingMessages(userid);
+  CheckPendingMessages(client);
   g_Spawned[client] = true;
 }
 
@@ -115,11 +110,9 @@ public Action CMD_TagRequest(int client, int args) {
     return Plugin_Handled;
   }
   
-  char userid[64], steamid[32];
-  IntToString(GetClientUserId(client), userid, sizeof(userid));
-  
-  if (!g_Players.GetString(userid, steamid, sizeof(steamid))) {
-    xVip_Reply(client, "Error: Could not retrieve your Steam ID. Please reconnect.");
+  char steamid[32];
+  if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
+    xVip_Reply(client, "Error: Could not retrieve your Steam ID.");
     return Plugin_Handled;
   }
   
@@ -152,7 +145,7 @@ public Action CMD_TagRequest(int client, int args) {
   strcopy(req.oldtag, sizeof(req.oldtag), currentTag);
   strcopy(req.newtag, sizeof(req.newtag), requestedTag);
   req.timestamp = GetTime();
-  strcopy(req.state, sizeof(req.state), "pending");
+  req.state = RequestState_Pending;
   
   char query[512];
   char escapedName[MAX_NAME_LENGTH*2+1];
@@ -168,10 +161,13 @@ public Action CMD_TagRequest(int client, int args) {
   g_DB.Escape(req.oldtag, escapedOldTag, sizeof(escapedOldTag));
   g_DB.Escape(req.newtag, escapedNewTag, sizeof(escapedNewTag));
   
+  TrimString(req.newtag);
+  Format(req.newtag, sizeof(req.newtag), "%s ", req.newtag);
+
   g_DB.Format(query, sizeof(query), 
     "INSERT INTO xVip_tagrequests (steamid, name, current_tag, desired_tag, timestamp, state) VALUES "...
     "('%s', '%s', '%s', '%s', UNIX_TIMESTAMP(), '%s')", 
-    req.steamid, escapedName, escapedOldTag, escapedNewTag, req.state);
+    req.steamid, escapedName, escapedOldTag, escapedNewTag, g_RequestStateNames[view_as<int>(req.state)]);
   
   DataPack pack = new DataPack();
   pack.WriteCell(GetClientUserId(client));
@@ -217,18 +213,21 @@ void CreateRequestsMenu(int client) {
   Menu menu = new Menu(RequestsMenuHandler);
   menu.SetTitle("%t", "Str_TagRequests");
   
+  int pendingCount = 0;
+  
   for (int i = 0; i < g_Requests.Length; i++) {
     TagRequest req;
     g_Requests.GetArray(i, req, sizeof(req));
     
-    if (StrEqual(req.state, "pending")) {
+    if (req.state == RequestState_Pending) {
       char indexStr[16];
       IntToString(i, indexStr, sizeof(indexStr));
       menu.AddItem(indexStr, req.name);
+      pendingCount++;
     }
   }
   
-  if (menu.ItemCount == 0) {
+  if (pendingCount == 0) {
     xVip_Reply(client, "%t", "NoRequests");
     delete menu;
     return;
@@ -241,7 +240,7 @@ void GetPendingTag(const char[] steamid, char[] buffer, int maxsize) {
   TagRequest req;
   for (int i = 0; i < g_Requests.Length; i++) {
     g_Requests.GetArray(i, req, sizeof(req));
-    if (StrEqual(req.steamid, steamid) && !StrEqual(req.state, "finished")) {
+    if (StrEqual(req.steamid, steamid) && req.state == RequestState_Pending) {
       strcopy(buffer, maxsize, req.newtag);
       return;
     }
@@ -249,16 +248,13 @@ void GetPendingTag(const char[] steamid, char[] buffer, int maxsize) {
   buffer[0] = '\0';
 }
 
-void CheckPendingMessages(int userid) {
-  char steamid[32], user_id[16];
-  IntToString(userid, user_id, sizeof(user_id));
-  
-  if (!g_Players.GetString(user_id, steamid, sizeof(steamid))) {
+void CheckPendingMessages(int client) {
+  char steamid[32];
+  if (!GetClientAuthId(client, AuthId_Steam2, steamid, sizeof(steamid))) {
     return;
   }
   
   int totalPendingRequests = 0;
-  int client = GetClientOfUserId(userid);
   
   if (!IsValidClient(client)) {
     return;
@@ -269,18 +265,20 @@ void CheckPendingMessages(int userid) {
     g_Requests.GetArray(i, req, sizeof(req));
     
     if (StrEqual(req.steamid, steamid)) {
-      switch (req.state[0]) {
-        case 'p': {
+      switch (req.state) {
+        case RequestState_Pending: {
           totalPendingRequests++;
         }
         
-        case 'd', 'a': {
-          SendInfoPanel(userid, req.state);
+        case RequestState_Approved, RequestState_Denied: {
           g_SelectedRequest = req;
-          if (req.state[0] == 'a') {
-            SetClientTag(req, userid);
+          SendInfoPanel(client, req.state == RequestState_Approved ? "approved" : "denied");
+          
+          if (req.state == RequestState_Approved) {
+            SetClientTag(req, client);
           }
-          UpdateRequest("finished", 0);
+          
+          UpdateRequest(RequestState_Finished, client);
         }
       }
     }
@@ -291,7 +289,7 @@ void CheckPendingMessages(int userid) {
   }
 }
 
-void UpdateRequest(char[] state, int userid) {
+void UpdateRequest(RequestState newState, int client) {
   if (g_DB == null) {
     LogError("UpdateRequest: Database connection not available");
     return;
@@ -301,18 +299,17 @@ void UpdateRequest(char[] state, int userid) {
   g_DB.Format(query, sizeof(query), 
     "UPDATE xVip_tagrequests SET state = '%s' WHERE steamid = '%s' AND desired_tag = '%s' "...
     "AND timestamp = (SELECT MAX(timestamp) FROM xVip_tagrequests t2 WHERE t2.steamid = '%s' AND t2.desired_tag = '%s')", 
-    state, g_SelectedRequest.steamid, g_SelectedRequest.newtag, g_SelectedRequest.steamid, g_SelectedRequest.newtag);
+    g_RequestStateNames[view_as<int>(newState)], g_SelectedRequest.steamid, g_SelectedRequest.newtag, 
+    g_SelectedRequest.steamid, g_SelectedRequest.newtag);
   
   DataPack pack = new DataPack();
-  pack.WriteString(state);
-  pack.WriteCell(userid);
+  pack.WriteCell(view_as<int>(newState));
+  pack.WriteCell(client != 0 ? GetClientUserId(client) : 0);
   
   g_DB.Query(SQL_StatusUpdate, query, pack);
 }
 
-void SendInfoPanel(int userid, const char[] state) {
-  int client = GetClientOfUserId(userid);
-  
+void SendInfoPanel(int client, const char[] stateStr) {
   if (!IsValidClient(client)) {
     return;
   }
@@ -320,7 +317,7 @@ void SendInfoPanel(int userid, const char[] state) {
   Panel panel = new Panel();
   panel.SetTitle("Tag Request");
   char line1[64], phrase[16], exitStr[16];
-  Format(phrase, sizeof(phrase), StrEqual(state, "approved") ? "TagApprovedUser" : "TagDeniedUser");
+  Format(phrase, sizeof(phrase), StrEqual(stateStr, "approved") ? "TagApprovedUser" : "TagDeniedUser");
   Format(line1, sizeof(line1), "%t", phrase, g_SelectedRequest.newtag);
   Format(exitStr, sizeof(exitStr), "%t", "Str_Exit");
   panel.DrawText(line1);
@@ -330,16 +327,16 @@ void SendInfoPanel(int userid, const char[] state) {
   panel.Send(client, EmptyHandler, MENU_TIME_FOREVER);
 }
 
-void SetRequestState(const char[] steamid, const char[] state) {
+void SetRequestState(const char[] steamid, RequestState newState) {
   for (int i = 0; i < g_Requests.Length; i++) {
     TagRequest req;
     g_Requests.GetArray(i, req, sizeof(req));
     if (StrEqual(req.steamid, steamid) && StrEqual(req.newtag, g_SelectedRequest.newtag)) {
-      if (StrEqual(state, "finished")) {
+      if (newState == RequestState_Finished) {
         g_Requests.Erase(i);
       }
       else {
-        strcopy(req.state, sizeof(req.state), state);
+        req.state = newState;
         g_Requests.SetArray(i, req, sizeof(req));
       }
       return;
@@ -380,15 +377,9 @@ void ShowRequestDetailsPanel(int client) {
   panel.Send(client, RequestDetailsPanelHandler, MENU_TIME_FOREVER);
 }
 
-void SetClientTag(TagRequest req, int userid) {
-  if (g_DB == null) {
-    LogError("SetClientTag: Database connection not available");
-    return;
-  }
-  
-  int client = GetClientOfUserId(userid);
-  
-  if (!IsValidClient(client)) {
+void SetClientTag(TagRequest req, int client) {
+  if (g_DB == null || !IsValidClient(client)) {
+    LogError("SetClientTag: Database connection not available or invalid client");
     return;
   }
   
@@ -402,6 +393,20 @@ void SetClientTag(TagRequest req, int userid) {
   
   CCC_SetTag(client, req.newtag);
   g_DB.Query(SQL_SetTag, query);
+}
+
+int FindClientBySteamID(const char[] steamid) {
+  char clientSteamID[32];
+  
+  for (int i = 1; i <= MaxClients; i++) {
+    if (IsValidClient(i) && GetClientAuthId(i, AuthId_Steam2, clientSteamID, sizeof(clientSteamID))) {
+      if (StrEqual(steamid, clientSteamID)) {
+        return i;
+      }
+    }
+  }
+  
+  return -1;
 }
 
 // ======= [MENU HANDLERS] ======= //
@@ -433,10 +438,10 @@ public int RequestDetailsPanelHandler(Menu menu, MenuAction action, int param1, 
     case MenuAction_Select: {
       switch (param2) {
         case 1: {
-          UpdateRequest("approved", GetClientUserId(param1));
+          UpdateRequest(RequestState_Approved, param1);
         }
         case 2: {
-          UpdateRequest("denied", GetClientUserId(param1));
+          UpdateRequest(RequestState_Denied, param1);
         }
         case 9: {
           CreateRequestsMenu(param1);
@@ -477,29 +482,36 @@ public void SQL_StatusUpdate(Database db, DBResultSet results, const char[] erro
   }
   
   pack.Reset();
-  char state[16];
-  pack.ReadString(state, sizeof(state));
-  int admin_client = GetClientOfUserId(pack.ReadCell());
+  RequestState newState = view_as<RequestState>(pack.ReadCell());
+  int admin_userid = pack.ReadCell();
+  int admin_client = GetClientOfUserId(admin_userid);
   delete pack;
   
-  SetRequestState(g_SelectedRequest.steamid, state);
+  SetRequestState(g_SelectedRequest.steamid, newState);
   
-  char phrase[32];
-  if (StrEqual(state, "approved")) {
-    strcopy(phrase, sizeof(phrase), "TagApprovedAdmin");
-    int userid = GetUserIDBySteamID(g_SelectedRequest.steamid);
-    int client = GetClientOfUserId(userid);
-    if (IsValidClient(client)) {
-      CCC_SetTag(client, g_SelectedRequest.newtag);
+  // If this is an approve/deny from an admin, notify the requesting player immediately
+  if (newState == RequestState_Approved || newState == RequestState_Denied) {
+    int target_client = FindClientBySteamID(g_SelectedRequest.steamid);
+    
+    if (IsValidClient(target_client)) {
+      SendInfoPanel(target_client, newState == RequestState_Approved ? "approved" : "denied");
+      
+      if (newState == RequestState_Approved) {
+        SetClientTag(g_SelectedRequest, target_client);
+      }
+      
+      // Mark as finished in DB and remove from local array
+      UpdateRequest(RequestState_Finished, 0);
     }
-  }
-  else if (StrEqual(state, "denied")) {
-    strcopy(phrase, sizeof(phrase), "TagDeniedAdmin");
-  }
-  
-  if (admin_client > 0 && IsClientInGame(admin_client)) {
-    xVip_Reply(admin_client, "%t", phrase, g_SelectedRequest.newtag);
-    CreateRequestsMenu(admin_client);
+    
+    // Notify admin
+    char phrase[32];
+    strcopy(phrase, sizeof(phrase), newState == RequestState_Approved ? "TagApprovedAdmin" : "TagDeniedAdmin");
+    
+    if (admin_client > 0 && IsClientInGame(admin_client)) {
+      xVip_Reply(admin_client, "%t", phrase, g_SelectedRequest.newtag);
+      CreateRequestsMenu(admin_client);
+    }
   }
 }
 
@@ -528,7 +540,20 @@ public void SQL_CacheRequests(Database db, DBResultSet results, const char[] err
     results.FetchString(currtagCol, req.oldtag, sizeof(req.oldtag));
     results.FetchString(wantedtagCol, req.newtag, sizeof(req.newtag));
     req.timestamp = results.FetchInt(timestampCol);
-    results.FetchString(stateCol, req.state, sizeof(req.state));
+    
+    char stateStr[16];
+    results.FetchString(stateCol, stateStr, sizeof(stateStr));
+    
+    // Convert state string to enum
+    if (StrEqual(stateStr, "pending")) {
+      req.state = RequestState_Pending;
+    } else if (StrEqual(stateStr, "approved")) {
+      req.state = RequestState_Approved;
+    } else if (StrEqual(stateStr, "denied")) {
+      req.state = RequestState_Denied;
+    } else if (StrEqual(stateStr, "finished")) {
+      req.state = RequestState_Finished;
+    }
     
     g_Requests.PushArray(req);
   }
@@ -565,6 +590,14 @@ public void SQL_Tables(Database db, DBResultSet results, const char[] error, any
   
   LogMessage("Database tables verified successfully.");
   
+  if (g_Late) {
+    for (int i = 1; i <= MaxClients; i++) {
+      if (IsValidClient(i)) {
+        OnClientPostAdminCheck(i);
+      }
+    }
+  }
+
   CacheRequests();
 }
 
