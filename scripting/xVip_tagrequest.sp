@@ -18,7 +18,7 @@ public Plugin myinfo = {
   name = "xVip - Tag Request", 
   author = "ampere", 
   description = "Allows players to submit a CCC tag request for admins to approve or deny.", 
-  version = "1.2", 
+  version = "1.3", 
   url = "github.com/maxijabase"
 }
 
@@ -292,7 +292,7 @@ void CheckPendingMessages(int client) {
   }
   
   if (totalPendingRequests > 0 && CheckCommandAccess(client, "sm_admin", ADMFLAG_GENERIC)) {
-    xVip_Reply(client, "%t", "ThereArePendingRequests", totalPendingRequests);
+    xVip_Reply(client, "%t", "ThereArePendingRequests", client, totalPendingRequests);
   }
 }
 

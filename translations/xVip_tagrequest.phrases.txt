@@ -33,6 +33,12 @@
 		"en" "Hello {green}{1}{default}! There are {orange}{2}{default} pending tag requests. Type {green}!tagrequests{default} to see them."	
 		"es" "¡Hola, {green}{1}{default}! Hay {orange}{2}{default} solicitudes de tags pendientes. Escribe {green}!tagrequests{default} para verlas."
 	}
+	"NewTagRequest"
+	{
+		"#format" "{1:s},{2:s}"
+		"en" "{1} requested the tag {yellow}{2}{default}."
+		"es" "{1} solicitó la tag {yellow}{2}{default}."
+	}
 	"TagApprovedAdmin"
 	{
 		"#format" "{1:s}"

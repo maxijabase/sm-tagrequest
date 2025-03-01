@@ -4,7 +4,9 @@
 	{
 		"Version"
 		{
-			"Latest"	"1.2"
+			"Latest"	"1.3"
+
+			"Notes" "Added missing phrase"
 		}
 	}
 	
@@ -12,5 +14,6 @@
 	{
 		"Plugin"	"Path_SM/plugins/xVip_tagrequest.smx"		
 		"Source"	"Path_SM/scripting/xVip_tagrequest.sp"
+		"Source"	"Path_SM/translations/xVip_tagrequest.phrases.txt"
 	}
 }
